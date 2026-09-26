@@ -177,6 +177,42 @@ app.post('/api/alumni/review/:id', async (req, res) => {
   }
 });
 
+app.post('/api/google-login', async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const [users] = await pool.query(
+      'SELECT * FROM users WHERE institutional_email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.json({
+        authorized: false,
+        message: "This Google account isn't registered in CampuServe. Contact your Registrar if you believe this is an error."
+      });
+    }
+
+    const user = users[0];
+    const token = jwt.sign(
+      { id: user.id, role: user.role, email: user.institutional_email },
+      process.env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
+    res.json({
+      authorized: true,
+      token,
+      role: user.role,
+      fullName: user.full_name
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Login check failed' });
+  }
+});
+
 app.listen(3000, () => {
     console.log("Server running at http://localhost:3000");
 });
