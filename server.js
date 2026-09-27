@@ -213,6 +213,97 @@ app.post('/api/google-login', async (req, res) => {
   }
 });
 
+// Submit a new document request
+app.post('/api/documents/request', async (req, res) => {
+  const { studentId, documentType, purpose, numberOfCopies, requestedSchedule } = req.body;
+
+  if (!studentId || !documentType || !numberOfCopies || !requestedSchedule) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // requestedSchedule comes in as "2026-09-27T13:05" from datetime-local input
+  const [requestedDate, requestedTime] = requestedSchedule.split('T');
+
+  if (!requestedDate || !requestedTime) {
+    return res.status(400).json({ error: 'Invalid schedule format' });
+  }
+
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO document_requests
+        (student_id, document_type, purpose, number_of_copies, requested_date, requested_time)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [studentId, documentType, purpose || null, numberOfCopies, requestedDate, requestedTime]
+    );
+
+    res.json({
+      message: 'Document request submitted successfully.',
+      documentRequestId: result.insertId
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to submit document request' });
+  }
+});
+
+app.get('/api/documents/my-requests/:studentId', async (req, res) => {
+  const { studentId } = req.params;
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM document_requests WHERE student_id = ? ORDER BY created_at DESC',
+      [studentId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch your requests' });
+  }
+});
+
+app.get('/api/documents/pending', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT * FROM document_requests WHERE status = 'pending' ORDER BY created_at ASC"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch pending requests' });
+  }
+});
+
+function generateClaimCode() {
+  return 'CS-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+app.post('/api/documents/:id/review', async (req, res) => {
+  const { id } = req.params;
+  const { decision } = req.body; // expected: 'processing' (approve) or 'cancelled' (reject)
+
+  try {
+    if (decision === 'processing') {
+      const claimCode = generateClaimCode();
+      await pool.query(
+        'UPDATE document_requests SET status = ?, claim_code = ? WHERE request_id = ?',
+        [decision, claimCode, id]
+      );
+      return res.json({ message: 'Request approved.', claimCode });
+    }
+
+    await pool.query(
+      'UPDATE document_requests SET status = ? WHERE request_id = ?',
+      [decision, id]
+    );
+    res.json({ message: `Request ${decision}.` });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update request' });
+  }
+});
+
 app.listen(3000, () => {
     console.log("Server running at http://localhost:3000");
 });
